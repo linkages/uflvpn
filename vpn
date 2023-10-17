@@ -1,0 +1,126 @@
+#!/bin/bash
+# requires: screen ifconfig route openconnect
+
+VPN_USER="linkages"
+VPN_HOST="vpn.fed.ufl.edu"
+TUN_IFAC=uffed.tun0
+MYGATEWAY=$(ip route list | grep default | awk '{print $3}')
+WINDOWNAME=${TUN_IFAC//./-}
+MYNIC="br0"
+TUNNELNAME="eio"
+NETWORKS='172.32.0.0/16 172.26.0.0/16 10.233.16.0/20' # Add your work networks here as needed
+
+RUN_USER=${USER}
+SOK_NAME=${VPN_USER}.${VPN_HOST}
+STY_NAME=${PPID}.${SOK_NAME}
+LOG="${HOME}/bin/fed-vpn.log"
+
+function log
+{
+    echo ${1} >> ${LOG}
+}
+
+function add_dns
+{
+    resolvectl dns ${TUN_IFAC} 10.233.18.10 10.233.18.140
+    resolvectl domain ${TUN_IFAC} fed-ad.ufl.edu fed.ufl.edu
+}
+
+function remove_dns
+{
+    resolvectl dns ${TUN_IFAC} ""
+    resolvectl domain ${TUN_IFAC} ""
+}
+
+# connects to VPN, does not return. 
+function vpn_connect
+{
+    exec openconnect \
+	 --interface=${TUN_IFAC} \
+	 --setuid=${RUN_USER} \
+	 --user="${VPN_USER}@ufl.edu/${TUNNELNAME}" \
+	 --script=/root/bin/fed-vpn \
+	 --servercert pin-sha256:dO1S5TNJhgxnwtSChcjknSA1EVmnj/3kVrBgFEGWi1Y= \
+	 ${VPN_HOST}
+}
+
+# adds routes, called indirectly from openconnect --script
+function add_routes
+{
+    ifconfig ${TUN_IFAC} inet ${INTERNAL_IP4_ADDRESS} netmask ${INTERNAL_IP4_NETMASK}
+    log "Adding requested routes";
+    for net in ${NETWORKS}; do
+	log "ip route add ${net} dev ${TUN_IFAC} scope link"
+	ip route add ${net} dev ${TUN_IFAC} scope link
+    done
+
+    MYIP=$(ip addr list ${MYNIC} | grep -w inet | awk '{print $2}' | awk -F / '{print $1}')
+    log "Adding route to ${VPNGATEWAY} via ${MYIP}"
+    log "ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC} source ${MYIP}"
+    ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC}
+    route -n
+}
+
+function remove_routes
+{
+    MYIP=$(ip addr list ${MYNIC} | grep -w inet | awk '{print $2}' | awk -F / '{print $1}')
+    log "Removing route to ${VPNGATEWAY} via ${MYIP}"
+    log "ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC} source ${MYIP}"
+    ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC}
+    route -n
+}
+
+# check if openconnect is making this call
+if [ "${TUNDEV}" == "${TUN_IFAC}" ]; then
+    # if so, then if this a connect routes need to be added
+    if [ "${reason}" == "connect" ]; then
+	log "Calling add routes. reason=${reason}";
+	add_routes
+	add_dns
+	exit 0
+    fi
+
+    if [ "${reason}" == "disconnect" ]; then
+	log "Calling remove routes. reason=${reason}";
+	remove_routes
+	remove_dns
+	exit 0
+    fi
+    
+    log "Exiting due to unknown reason. reason=${reason}";
+    exit 0
+fi
+
+# check if VPN has already been created
+ifconfig ${TUN_IFAC} >/dev/null 2>&1 && echo "VPN is already running, attach with tmux attach -tvpn" && exit 2
+
+# If there is an argument passed in then this is most likely in a tmux session/window
+if [ $1 ]; then
+    if [ $1 == "start" ]; then
+	log "Being called to start up"
+	vpn_connect
+    else
+	log "Got called with unknown argument: [${1}]"
+	exit 2
+    fi
+else
+    # check to see if there is a tmux session named vpn already
+    tmux list-sessions 2>&1 | grep vpn > /dev/null 
+    if [ $? -ne 0 ]; then
+	log "Starting up a new tmux session"
+	tmux new-session -tvpn \; detach
+    else
+	log "Found an existing tmux session"
+    fi
+
+    # check to see if there is a tmux window with a name of openconnect
+    tmux list-windows -tvpn 2>&1 | grep ${WINDOWNAME} > /dev/null
+    if [ $? -ne 0 ]; then
+	log "Starting up a new window in the tmux session"
+	tmux new-window -tvpn -n${WINDOWNAME} "${0} start"
+    else
+	log "Found an existing tmux session with a window named openconnect"
+	log "Attaching to the existing session"
+	tmux select-window -t vpn:${WINDOWNAME} \; a
+    fi
+fi
