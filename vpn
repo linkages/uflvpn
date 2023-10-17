@@ -1,5 +1,5 @@
 #!/bin/bash
-# requires: screen ifconfig route openconnect
+# requires: tmux openconnect resolvectl iproute2
 
 VPN_USER="linkages"
 VPN_HOST="vpn.fed.ufl.edu"
@@ -47,7 +47,6 @@ function vpn_connect
 # adds routes, called indirectly from openconnect --script
 function add_routes
 {
-    ifconfig ${TUN_IFAC} inet ${INTERNAL_IP4_ADDRESS} netmask ${INTERNAL_IP4_NETMASK}
     log "Adding requested routes";
     for net in ${NETWORKS}; do
 	log "ip route add ${net} dev ${TUN_IFAC} scope link"
@@ -58,7 +57,7 @@ function add_routes
     log "Adding route to ${VPNGATEWAY} via ${MYIP}"
     log "ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC} source ${MYIP}"
     ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC}
-    route -n
+    ip route list
 }
 
 function remove_routes
@@ -67,13 +66,16 @@ function remove_routes
     log "Removing route to ${VPNGATEWAY} via ${MYIP}"
     log "ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC} source ${MYIP}"
     ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC}
-    route -n
+    ip route list
 }
 
 # check if openconnect is making this call
 if [ "${TUNDEV}" == "${TUN_IFAC}" ]; then
-    # if so, then if this a connect routes need to be added
+    # if so, then if this "connect" then we need to bring up the interface and setup routes
     if [ "${reason}" == "connect" ]; then
+	log "Setting IP addr on interface [${TUN_IFAC}] to ${INTERNAL_IP4_ADDRESS}/${INTERNAL_IP4_NETMASKLEN}"
+	ip addr add ${INTERNAL_IP4_ADDRESS}/${INTERNAL_IP4_NETMASKLEN} dev ${TUN_IFAC}
+	ip link set dev ${TUN_IFAC} up
 	log "Calling add routes. reason=${reason}";
 	add_routes
 	add_dns
@@ -92,7 +94,7 @@ if [ "${TUNDEV}" == "${TUN_IFAC}" ]; then
 fi
 
 # check if VPN has already been created
-ifconfig ${TUN_IFAC} >/dev/null 2>&1 && echo "VPN is already running, attach with tmux attach -tvpn" && exit 2
+ip link show dev ${TUN_IFAC} >/dev/null 2>&1 && echo "VPN is already running, attach with tmux attach -tvpn" && exit 2
 
 # If there is an argument passed in then this is most likely in a tmux session/window
 if [ $1 ]; then
