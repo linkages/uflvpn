@@ -1,19 +1,26 @@
 #!/bin/bash
-# requires: tmux openconnect resolvectl iproute2
+# requires: tmux openconnect systemd(resolvectl) iproute2(ip) coreutils(dirname)
 
+# Set these variables as needed
 VPN_USER="linkages"
 VPN_HOST="vpn.fed.ufl.edu"
-TUN_IFAC=uffed.tun0
+TUN_IFAC=uffed.tun0 # interface name created by openconnect, needs to be unique
+MYNIC="br0" # interface to use to connect to the internet
+TUNNELNAME="eio" # the part that goes after the "/" when connecting to the VPN server
+NETWORKS='172.32.0.0/16 172.26.0.0/16 10.233.16.0/20' # Add your work networks here as needed
+LOG="${HOME}/bin/fed-vpn.log" # output log
+
 MYGATEWAY=$(ip route list | grep default | awk '{print $3}')
 WINDOWNAME=${TUN_IFAC//./-}
-MYNIC="br0"
-TUNNELNAME="eio"
-NETWORKS='172.32.0.0/16 172.26.0.0/16 10.233.16.0/20' # Add your work networks here as needed
 
 RUN_USER=${USER}
 SOK_NAME=${VPN_USER}.${VPN_HOST}
 STY_NAME=${PPID}.${SOK_NAME}
-LOG="${HOME}/bin/fed-vpn.log"
+LOGPATH=$(dirname ${LOG})
+
+if [ ! -d ${LOGPATH} ]; then
+    mkdir -p ${LOGPATH}
+fi
 
 function log
 {
