@@ -1,0 +1,29 @@
+function check_args {
+    configItems="user host tun_ifac nic tunnelname networks log"
+    for item in ${configItems}; do
+	if [[ ! ${__} == *"${item}"* ]]; then
+	    echo "ERROR: ${item} is not in configuration file"
+	    bail=1
+	fi
+    done;
+
+    if [ ${bail} ]; then
+	exit 2
+    fi
+}
+
+function check_dns {
+    if [[ ${__} == *"dns_servers"* ]]; then
+	return 0
+    else
+	return 1
+    fi
+}
+
+function check_domains {
+    if [[ ${__} == *"domains"* ]]; then
+	return 0
+    else
+	return 1
+    fi
+}
