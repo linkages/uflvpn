@@ -1,22 +1,50 @@
 #!/bin/bash
-# requires: tmux openconnect systemd(resolvectl) iproute2(ip) coreutils(dirname)
+# requires: tmux openconnect systemd(resolvectl) iproute2(ip) coreutils(dirname) sed awk
 
-# Set these variables as needed
-VPN_USER="linkages"
-VPN_HOST="vpn.fed.ufl.edu"
-TUN_IFAC=uffed.tun0 # interface name created by openconnect, needs to be unique
-MYNIC="br0" # interface to use to connect to the internet
-TUNNELNAME="eio" # the part that goes after the "/" when connecting to the VPN server
-NETWORKS='172.32.0.0/16 172.26.0.0/16 10.233.16.0/20' # Add your work networks here as needed
-LOG="${HOME}/bin/fed-vpn.log" # output log
+# load up the yaml parser
+source ./lib/parse_yaml
+source ./lib/functions
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <config file>"
+    exit 1
+fi
+
+if [ -f ./${1} ]; then
+    eval $(parse_yaml ./${1})
+else
+    echo "Could not find config file: ${1}"
+    exit 2
+fi
+
+check_args
+
+NETWORKS=""
+for network in ${networks_}; do
+    NETWORKS=$(echo ${NETWORKS} $(eval echo \${${network}}))
+done
+
+DNS_SERVERS=""
+if [ check_dns ]; then
+    for dns_server in ${dns_servers_}; do
+	DNS_SERVERS=$(echo ${DNS_SERVERS} $(eval echo \${${dns_server}}))
+    done
+fi
+
+DOMAINS=""
+if [ check_domains ]; then
+    for domain in ${domains_}; do
+	DOMAINS=$(echo ${DOMAINS} $(eval echo \${domain}))
+    done
+fi
 
 MYGATEWAY=$(ip route list | grep default | awk '{print $3}')
-WINDOWNAME=${TUN_IFAC//./-}
+WINDOWNAME=${tun_ifac//./-}
 
 RUN_USER=${USER}
-SOK_NAME=${VPN_USER}.${VPN_HOST}
+SOK_NAME=${user}.${host}
 STY_NAME=${PPID}.${SOK_NAME}
-LOGPATH=$(dirname ${LOG})
+LOGPATH=$(dirname ${log})
 
 if [ ! -d ${LOGPATH} ]; then
     mkdir -p ${LOGPATH}
@@ -24,31 +52,31 @@ fi
 
 function log
 {
-    echo ${1} >> ${LOG}
+    echo ${1} >> ${log}
 }
 
 function add_dns
 {
-    resolvectl dns ${TUN_IFAC} 10.233.18.10 10.233.18.140
-    resolvectl domain ${TUN_IFAC} fed-ad.ufl.edu fed.ufl.edu
+    resolvectl dns ${tun_ifac} ${DNS_SERVERS}
+    resolvectl domain ${tun_ifac} ${DOMAINS}
 }
 
 function remove_dns
 {
-    resolvectl dns ${TUN_IFAC} ""
-    resolvectl domain ${TUN_IFAC} ""
+    resolvectl dns ${tun_ifac} ""
+    resolvectl domain ${tun_ifac} ""
 }
 
 # connects to VPN, does not return. 
 function vpn_connect
 {
     exec openconnect \
-	 --interface=${TUN_IFAC} \
+	 --interface=${tun_ifac} \
 	 --setuid=${RUN_USER} \
-	 --user="${VPN_USER}@ufl.edu/${TUNNELNAME}" \
-	 --script=/root/bin/fed-vpn \
+	 --user="${user}@ufl.edu/${tunnelname}" \
+	 --script=${0} \
 	 --servercert pin-sha256:dO1S5TNJhgxnwtSChcjknSA1EVmnj/3kVrBgFEGWi1Y= \
-	 ${VPN_HOST}
+	 ${host}
 }
 
 # adds routes, called indirectly from openconnect --script
@@ -56,33 +84,33 @@ function add_routes
 {
     log "Adding requested routes";
     for net in ${NETWORKS}; do
-	log "ip route add ${net} dev ${TUN_IFAC} scope link"
-	ip route add ${net} dev ${TUN_IFAC} scope link
+	log "ip route add ${net} dev ${tun_ifac} scope link"
+	ip route add ${net} dev ${tun_ifac} scope link
     done
 
-    MYIP=$(ip addr list ${MYNIC} | grep -w inet | awk '{print $2}' | awk -F / '{print $1}')
+    MYIP=$(ip addr list ${nic} | grep -w inet | awk '{print $2}' | awk -F / '{print $1}')
     log "Adding route to ${VPNGATEWAY} via ${MYIP}"
-    log "ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC} source ${MYIP}"
-    ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC}
+    log "ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${nic} source ${MYIP}"
+    ip route add ${VPNGATEWAY} via ${MYGATEWAY} dev ${nic}
     ip route list
 }
 
 function remove_routes
 {
-    MYIP=$(ip addr list ${MYNIC} | grep -w inet | awk '{print $2}' | awk -F / '{print $1}')
+    MYIP=$(ip addr list ${nic} | grep -w inet | awk '{print $2}' | awk -F / '{print $1}')
     log "Removing route to ${VPNGATEWAY} via ${MYIP}"
-    log "ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC} source ${MYIP}"
-    ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${MYNIC}
+    log "ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${nic} source ${MYIP}"
+    ip route del ${VPNGATEWAY} via ${MYGATEWAY} dev ${nic}
     ip route list
 }
 
 # check if openconnect is making this call
-if [ "${TUNDEV}" == "${TUN_IFAC}" ]; then
+if [ "${TUNDEV}" == "${tun_ifac}" ]; then
     # if so, then if this "connect" then we need to bring up the interface and setup routes
     if [ "${reason}" == "connect" ]; then
-	log "Setting IP addr on interface [${TUN_IFAC}] to ${INTERNAL_IP4_ADDRESS}/${INTERNAL_IP4_NETMASKLEN}"
-	ip addr add ${INTERNAL_IP4_ADDRESS}/${INTERNAL_IP4_NETMASKLEN} dev ${TUN_IFAC}
-	ip link set dev ${TUN_IFAC} up
+	log "Setting IP addr on interface [${tun_ifac}] to ${INTERNAL_IP4_ADDRESS}/${INTERNAL_IP4_NETMASKLEN}"
+	ip addr add ${INTERNAL_IP4_ADDRESS}/${INTERNAL_IP4_NETMASKLEN} dev ${tun_ifac}
+	ip link set dev ${tun_ifac} up
 	log "Calling add routes. reason=${reason}";
 	add_routes
 	add_dns
@@ -101,7 +129,7 @@ if [ "${TUNDEV}" == "${TUN_IFAC}" ]; then
 fi
 
 # check if VPN has already been created
-ip link show dev ${TUN_IFAC} >/dev/null 2>&1 && echo "VPN is already running, attach with tmux attach -tvpn" && exit 2
+ip link show dev ${tun_ifac} >/dev/null 2>&1 && echo "VPN is already running, attach with tmux attach -tvpn" && exit 2
 
 # If there is an argument passed in then this is most likely in a tmux session/window
 if [ $1 ]; then
