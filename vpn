@@ -25,14 +25,14 @@ for network in ${networks_}; do
 done
 
 DNS_SERVERS=""
-if [ check_dns ]; then
+if [[ check_dns ]]; then
     for dns_server in ${dns_servers_}; do
 	DNS_SERVERS=$(echo ${DNS_SERVERS} $(eval echo \${${dns_server}}))
     done
 fi
 
 DOMAINS=""
-if [ check_domains ]; then
+if [[ check_domains ]]; then
     for domain in ${domains_}; do
 	DOMAINS=$(echo ${DOMAINS} $(eval echo \${domain}))
     done
@@ -49,11 +49,6 @@ LOGPATH=$(dirname ${log})
 if [ ! -d ${LOGPATH} ]; then
     mkdir -p ${LOGPATH}
 fi
-
-function log
-{
-    echo ${1} >> ${log}
-}
 
 function add_dns
 {

@@ -27,3 +27,7 @@ function check_domains {
 	return 1
     fi
 }
+
+function log {
+    echo ${1} >> ${log}
+}
