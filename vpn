@@ -1,0 +1,54 @@
+#!/bin/bash
+
+source ./lib/parse_yaml
+source ./lib/functions
+
+while getopts ":c:" opt; do
+    case ${opt} in
+	c)
+	    configFile=${OPTARG}
+	    ;;
+    esac
+done
+
+if [ -v configFile ]; then
+    config=${configFile}
+else
+    config="./config.yaml"
+fi
+
+if [ -f ${config} ]; then
+    eval $(parse_yaml ${config})
+else
+    echo "Failed to find configuration file: [${config}]"
+    exit 2
+fi
+
+check_args
+
+WINDOWNAME=${tun_ifac//./-}
+
+# Setup logging
+if [ ! -d ${logs} ]; then
+    mkdir -p ${logs}
+fi
+
+# check to see if there is a tmux session named vpn already
+tmux list-sessions 2>&1 | grep vpn > /dev/null 
+if [ $? -ne 0 ]; then
+    log "Starting up a new tmux session"
+    tmux new-session -tvpn \; detach
+else
+    log "Found an existing tmux session"
+fi
+
+# check to see if there is a tmux window with a name of openconnect
+tmux list-windows -tvpn 2>&1 | grep ${WINDOWNAME} > /dev/null
+if [ $? -ne 0 ]; then
+    log "Starting up a new window in the tmux session"
+    tmux new-window -tvpn -n${WINDOWNAME} "./go -c ${config}"
+else
+    log "Found an existing tmux session with a window named openconnect"
+    log "Attaching to the existing session"
+    tmux select-window -t vpn:${WINDOWNAME} \; a
+fi
