@@ -1,5 +1,5 @@
 function check_args {
-    configItems="user host tun_ifac nic tunnelname networks log"
+    configItems="user host tun_ifac nic tunnelname networks logs"
     for item in ${configItems}; do
 	if [[ ! ${__} == *"${item}"* ]]; then
 	    echo "ERROR: ${item} is not in configuration file"
@@ -29,5 +29,8 @@ function check_domains {
 }
 
 function log {
-    echo ${1} >> ${log}
+    if [ -v debug ]; then
+	echo "[$$] ${1}"
+    fi
+    echo ${1} >> ${logs}/$$.log
 }
