@@ -55,7 +55,6 @@ if [ check_domains ]; then
 fi
 
 MYGATEWAY=$(ip route list | grep default | awk '{print $3}')
-WINDOWNAME=${tun_ifac//./-}
 
 RUN_USER=${USER}
 SOK_NAME=${user}.${host}
