@@ -5,19 +5,33 @@
 source ./lib/parse_yaml
 source ./lib/functions
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <config file>"
-    exit 1
+while getopts "c:" opt; do
+    case ${opt} in
+	c)
+	    configFile=${OPTARG}
+	    ;;
+    esac
+done
+
+if [ -v configFile ]; then
+    config=${configFile}
+else
+    config="./config.yaml"
 fi
 
-if [ -f ./${1} ]; then
-    eval $(parse_yaml ./${1})
+if [ -f ${config} ]; then
+    eval $(parse_yaml ${config})
 else
-    echo "Could not find config file: ${1}"
+    echo "Failed to find configuration file: [${config}]"
     exit 2
 fi
 
 check_args
+
+# Setup logging
+if [ ! -d ${logs} ]; then
+    mkdir -p ${logs}
+fi
 
 NETWORKS=""
 for network in ${networks_}; do
@@ -25,16 +39,18 @@ for network in ${networks_}; do
 done
 
 DNS_SERVERS=""
-if [[ check_dns ]]; then
+if [ check_dns ]; then
+    log "Going to use customer dns servers"
     for dns_server in ${dns_servers_}; do
 	DNS_SERVERS=$(echo ${DNS_SERVERS} $(eval echo \${${dns_server}}))
     done
 fi
 
 DOMAINS=""
-if [[ check_domains ]]; then
+if [ check_domains ]; then
+    log "Going to use custom domain search"
     for domain in ${domains_}; do
-	DOMAINS=$(echo ${DOMAINS} $(eval echo \${domain}))
+	DOMAINS=$(echo ${DOMAINS} $(eval echo \${${domain}}))
     done
 fi
 
@@ -44,11 +60,6 @@ WINDOWNAME=${tun_ifac//./-}
 RUN_USER=${USER}
 SOK_NAME=${user}.${host}
 STY_NAME=${PPID}.${SOK_NAME}
-LOGPATH=$(dirname ${log})
-
-if [ ! -d ${LOGPATH} ]; then
-    mkdir -p ${LOGPATH}
-fi
 
 function add_dns
 {
@@ -65,13 +76,22 @@ function remove_dns
 # connects to VPN, does not return. 
 function vpn_connect
 {
-    exec openconnect \
-	 --interface=${tun_ifac} \
-	 --setuid=${RUN_USER} \
-	 --user="${user}@ufl.edu/${tunnelname}" \
-	 --script=${0} \
-	 --servercert pin-sha256:dO1S5TNJhgxnwtSChcjknSA1EVmnj/3kVrBgFEGWi1Y= \
-	 ${host}
+    if [ -v certfingerprint ]; then
+	exec openconnect \
+	     --interface=${tun_ifac} \
+	     --setuid=${RUN_USER} \
+	     --user="${user}@ufl.edu/${tunnelname}" \
+	     --script="${0} -c ${config}" \
+	     --servercert="${certfingerprint}" \
+	     ${host}
+    else
+	exec openconnect \
+	     --interface=${tun_ifac} \
+	     --setuid=${RUN_USER} \
+	     --user="${user}@ufl.edu/${tunnelname}" \
+	     --script="${0} -c ${config}" \
+	     ${host}
+    fi
 }
 
 # adds routes, called indirectly from openconnect --script
@@ -124,35 +144,11 @@ if [ "${TUNDEV}" == "${tun_ifac}" ]; then
 fi
 
 # check if VPN has already been created
-ip link show dev ${tun_ifac} >/dev/null 2>&1 && echo "VPN is already running, attach with tmux attach -tvpn" && exit 2
+ip link show dev ${tun_ifac} >/dev/null 2>&1
 
-# If there is an argument passed in then this is most likely in a tmux session/window
-if [ $1 ]; then
-    if [ $1 == "start" ]; then
-	log "Being called to start up"
-	vpn_connect
-    else
-	log "Got called with unknown argument: [${1}]"
-	exit 2
-    fi
-else
-    # check to see if there is a tmux session named vpn already
-    tmux list-sessions 2>&1 | grep vpn > /dev/null 
-    if [ $? -ne 0 ]; then
-	log "Starting up a new tmux session"
-	tmux new-session -tvpn \; detach
-    else
-	log "Found an existing tmux session"
-    fi
-
-    # check to see if there is a tmux window with a name of openconnect
-    tmux list-windows -tvpn 2>&1 | grep ${WINDOWNAME} > /dev/null
-    if [ $? -ne 0 ]; then
-	log "Starting up a new window in the tmux session"
-	tmux new-window -tvpn -n${WINDOWNAME} "${0} start"
-    else
-	log "Found an existing tmux session with a window named openconnect"
-	log "Attaching to the existing session"
-	tmux select-window -t vpn:${WINDOWNAME} \; a
-    fi
+if [ $? -eq 0 ]; then
+    log "VPN is already running."
+    exit 2
 fi
+
+vpn_connect
